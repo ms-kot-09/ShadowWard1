@@ -9,15 +9,13 @@ env:
   GODOT_VERSION: "4.2.2"
 
 jobs:
-  build-android:
-    name: 📱 Android APK
+  build:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Install Java
         uses: actions/setup-java@v4
         with:
           java-version: '17'
@@ -33,132 +31,69 @@ jobs:
             -storepass android -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Download Godot ${{ env.GODOT_VERSION }}
+      - name: Download Godot
         run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64.zip" -O godot.zip
-          unzip -q godot.zip
-          sudo mv "Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64" /usr/local/bin/godot
+          wget -q https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64.zip
+          unzip -q Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64.zip
+          sudo mv Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64 /usr/local/bin/godot
           sudo chmod +x /usr/local/bin/godot
           godot --version
 
-      - name: Download export templates
+      - name: Install export templates
         run: |
           mkdir -p ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable
-          wget -q "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_export_templates.tpz" -O templates.tpz
-          unzip -q templates.tpz
+          wget -q https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_export_templates.tpz
+          unzip -q Godot_v${{ env.GODOT_VERSION }}-stable_export_templates.tpz
           mv templates/* ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable/
-          echo "Templates installed:"
-          ls ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable/ | head -10
 
       - name: Setup Android SDK
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          # Accept licenses
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" 2>/dev/null || true
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
 
       - name: Configure Godot Android settings
         run: |
           mkdir -p ~/.config/godot
-          cat > ~/.config/godot/editor_settings-4.tres << EOF
+          cat > ~/.config/godot/editor_settings-4.tres << SETTINGS
           [gd_resource type="EditorSettings" format=3]
           [resource]
           export/android/android_sdk_path = "$ANDROID_HOME"
           export/android/debug_keystore = "$GITHUB_WORKSPACE/android/debug.keystore"
           export/android/debug_keystore_user = "androiddebugkey"
           export/android/debug_keystore_pass = "android"
-          EOF
+          SETTINGS
 
-      - name: Export Android APK
+      - name: Build Android APK
         run: |
           mkdir -p build
-          godot --headless --export-debug "Android" "$GITHUB_WORKSPACE/build/ShadowWard.apk" 2>&1 | tail -20 || true
-          # Fallback: export without templates check
-          if [ ! -f "build/ShadowWard.apk" ]; then
-            echo "APK not created, trying alternative..."
-            godot --headless --export-release "Android" "$GITHUB_WORKSPACE/build/ShadowWard.apk" 2>&1 | tail -20 || true
-          fi
-          ls -la build/ || echo "Build dir contents above"
+          godot --headless --path . --export-debug "Android" build/ShadowWard.apk
+          ls -la build
 
-      - name: Upload Android APK
+      - name: Build Windows EXE
+        run: |
+          godot --headless --path . --export-release "Windows Desktop" build/ShadowWard.exe
+          ls -la build
+
+      - name: Upload builds
         uses: actions/upload-artifact@v4
         with:
-          name: ShadowWard-Android
-          path: build/ShadowWard.apk
-          if-no-files-found: warn
-
-  build-windows:
-    name: 🖥️ Windows EXE
-    runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Godot ${{ env.GODOT_VERSION }}
-        run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64.zip" -O godot.zip
-          unzip -q godot.zip
-          sudo mv "Godot_v${{ env.GODOT_VERSION }}-stable_linux.x86_64" /usr/local/bin/godot
-          sudo chmod +x /usr/local/bin/godot
-
-      - name: Download export templates
-        run: |
-          mkdir -p ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable
-          wget -q "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_VERSION }}-stable/Godot_v${{ env.GODOT_VERSION }}-stable_export_templates.tpz" -O templates.tpz
-          unzip -q templates.tpz
-          mv templates/* ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable/
-
-      - name: Export Windows EXE
-        run: |
-          mkdir -p build
-          godot --headless --export-release "Windows Desktop" "$GITHUB_WORKSPACE/build/ShadowWard.exe" 2>&1 | tail -20 || true
-          ls -la build/
-
-      - name: Upload Windows build
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShadowWard-Windows
-          path: |
-            build/ShadowWard.exe
-            build/ShadowWard.pck
-          if-no-files-found: warn
+          name: ShadowWard-Build
+          path: build/
 
   release:
-    name: 📦 GitHub Release
-    needs: [build-android, build-windows]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: List artifacts
-        run: find artifacts -type f
-
-      - uses: softprops/action-gh-release@v2
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v1.0.${{ github.run_number }}"
-          name: "🕯️ Shadow Ward v1.0.${{ github.run_number }}"
-          body: |
-            ## 🕯️ Shadow Ward — Психологический хоррор
-
-            ### 📱 Android
-            Скачай APK, установи через файловый менеджер.
-            Управление: виртуальный джойстик + тап-камера.
-
-            ### 🖥️ Windows
-            Распакуй и запусти ShadowWard.exe
-            Управление: WASD + мышь, F — фонарик, E — взаимодействие.
-
-            ### ⚠️ При установке APK
-            Разрешить установку из неизвестных источников.
-          files: |
-            artifacts/**/*.apk
-            artifacts/**/*.exe
-            artifacts/**/*.pck
-          generate_release_notes: false
+          tag_name: v1.0.${{ github.run_number }}
+          name: Shadow Ward v1.0.${{ github.run_number }}
+          files: artifacts/**/*
